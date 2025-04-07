@@ -91,12 +91,12 @@ pipeline {
         }
         failure {
             echo "Pipeline failed - check the logs for details"
-            // Uncomment when Slack is configured
+            // Uncomment when Slack is configured:
             // slackSend color: 'danger', message: "Build Failed: ${env.JOB_NAME} #${env.BUILD_NUMBER}"
         }
         success {
             echo "Pipeline completed successfully"
-            // Uncomment when Slack is configured
+            // Uncomment when Slack is configured:
             // slackSend color: 'good', message: "Deployed successfully: ${env.JOB_NAME} #${env.BUILD_NUMBER}"
         }
     }
