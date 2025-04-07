@@ -41,13 +41,4 @@ pipeline {
             }
         }
     }
-
-    post {
-        success {
-            slackSend(color: 'good', message: "✅ Deployment Successful: ${env.JOB_NAME} ${env.BUILD_NUMBER}")
-        }
-        failure {
-            slackSend(color: 'danger', message: "❌ Deployment Failed: ${env.JOB_NAME} ${env.BUILD_NUMBER}")
-        }
-    }
 }
