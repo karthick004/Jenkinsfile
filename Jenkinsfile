@@ -10,7 +10,8 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
-                checkout scm
+                git url: 'https://github.com/karthick004/reactapp.git/', 
+                    branch: 'main'
             }
         }
 
