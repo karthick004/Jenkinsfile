@@ -9,7 +9,7 @@ pipeline {
     }
 
     tools {
-        nodejs 'nodejs'  // Ensure Node.js is installed via Jenkins Global Tool Configuration
+        nodejs 'Node18'  // Changed from 'nodejs' to match your configured tool name
     }
 
     stages {
@@ -86,16 +86,18 @@ pipeline {
 
     post {
         always {
-            // Cleanup workspace if needed
-            // cleanWs()
+            echo "Pipeline completed - cleaning up"
+            // Add any cleanup steps here if needed
         }
         failure {
-            // slackSend color: 'danger', message: "Build Failed: ${env.JOB_NAME} #${env.BUILD_NUMBER}"
             echo "Pipeline failed - check the logs for details"
+            // Uncomment when Slack is configured
+            // slackSend color: 'danger', message: "Build Failed: ${env.JOB_NAME} #${env.BUILD_NUMBER}"
         }
         success {
-            // slackSend color: 'good', message: "Deployed successfully: ${env.JOB_NAME} #${env.BUILD_NUMBER}"
             echo "Pipeline completed successfully"
+            // Uncomment when Slack is configured
+            // slackSend color: 'good', message: "Deployed successfully: ${env.JOB_NAME} #${env.BUILD_NUMBER}"
         }
     }
 }
