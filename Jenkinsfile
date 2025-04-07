@@ -3,7 +3,7 @@ pipeline {
 
     environment {
         DEPLOY_DIR = '/var/www/react-app'
-        SSH_SERVER = 'your-server-ip'
+        SSH_SERVER = '18.233.101.14'
         SSH_USER = 'ubuntu'
     }
 
@@ -28,7 +28,7 @@ pipeline {
 
         stage('Deploy to Server') {
             steps {
-                sshagent(['your-ssh-credentials-id']) {
+                sshagent(['web-hook']) {
                     sh """
                         rsync -avz --delete -e ssh build/ ${SSH_USER}@${SSH_SERVER}:${DEPLOY_DIR}/
                         ssh ${SSH_USER}@${SSH_SERVER} "
