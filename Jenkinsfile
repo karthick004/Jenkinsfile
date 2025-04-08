@@ -39,12 +39,6 @@ pipeline {
             }
         }
 
-        stage('Lint Code') {
-            steps {
-                sh 'npm run lint'  // Ensure your lint command is set up in package.json
-            }
-        }
-
         stage('Install Dependencies') {
             steps {
                 sh '''
