@@ -39,6 +39,12 @@ pipeline {
             }
         }
 
+        stage('Lint Code') {
+            steps {
+                sh 'npm run lint'  // Ensure your lint command is set up in package.json
+            }
+        }
+
         stage('Install Dependencies') {
             steps {
                 sh '''
@@ -70,8 +76,8 @@ pipeline {
                     # Verify node_modules exists
                     [ -d node_modules ] || { echo "Error: node_modules missing"; exit 1; }
                     
-                    # Run build with increased memory
-                    NODE_OPTIONS="--max-old-space-size=4096" npm run build
+                    # Run build with increased memory and verbose output for debugging
+                    NODE_OPTIONS="--max-old-space-size=4096" npm run build --verbose
                     
                     # Verify build output
                     [ -d build ] || { echo "Error: Build failed - no build directory"; exit 1; }
@@ -89,6 +95,7 @@ pipeline {
                                 rsync -avz --delete --progress -e ssh build/ ${SSH_USER}@${SSH_SERVER}:${DEPLOY_DIR}/
                             """
                             
+
                             sh """
                                 ssh ${SSH_USER}@${SSH_SERVER} "
                                     if pm2 id react-app > /dev/null 2>&1; then
