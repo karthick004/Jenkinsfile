@@ -9,7 +9,7 @@ pipeline {
     }
 
     tools {
-        nodejs 'Node18'  // Changed from 'nodejs' to match your configured tool name
+        nodejs 'Node18'  // Must use Node.js 16.x or 18.x (LTS versions)
     }
 
     stages {
@@ -24,7 +24,7 @@ pipeline {
                 git(
                     url: 'https://github.com/karthick004/reactapp.git',
                     branch: 'main',
-                    credentialsId: 'git-hub',  // Use your configured credentials
+                    credentialsId: 'git-hub',
                     poll: false,
                     changelog: false
                 )
@@ -40,16 +40,31 @@ pipeline {
 
         stage('Install Dependencies') {
             steps {
-                sh 'npm install --legacy-peer-deps'  // Handle dependency conflicts
+                sh '''
+                    # Force Node.js version check
+                    echo "Using Node.js version: $(node -v)"
+                    echo "Using npm version: $(npm -v)"
+                    
+                    # Clean install with legacy peer deps
+                    npm ci --legacy-peer-deps
+                    
+                    # Fix potential module issues
+                    npm install ajv@^8.0.0
+                    npm install ajv-keywords@^5.0.0
+                '''
             }
         }
 
         stage('Build Production') {
             steps {
-                sh 'npm run build'
-                
-                // Verify build output
                 sh '''
+                    # Verify node_modules exists
+                    [ -d node_modules ] || { echo "Error: node_modules missing"; exit 1; }
+                    
+                    # Run build with increased memory
+                    NODE_OPTIONS="--max-old-space-size=4096" npm run build
+                    
+                    # Verify build output
                     [ -d build ] || { echo "Error: Build failed - no build directory"; exit 1; }
                     [ -f build/index.html ] || { echo "Error: Missing build/index.html"; exit 1; }
                 '''
@@ -65,7 +80,6 @@ pipeline {
                                 rsync -avz --delete --progress -e ssh build/ ${SSH_USER}@${SSH_SERVER}:${DEPLOY_DIR}/
                             """
                             
-                            // Check if PM2 process exists before restarting
                             sh """
                                 ssh ${SSH_USER}@${SSH_SERVER} "
                                     if pm2 id react-app > /dev/null 2>&1; then
@@ -87,17 +101,12 @@ pipeline {
     post {
         always {
             echo "Pipeline completed - cleaning up"
-            // Add any cleanup steps here if needed
         }
         failure {
             echo "Pipeline failed - check the logs for details"
-            // Uncomment when Slack is configured:
-            // slackSend color: 'danger', message: "Build Failed: ${env.JOB_NAME} #${env.BUILD_NUMBER}"
         }
         success {
             echo "Pipeline completed successfully"
-            // Uncomment when Slack is configured:
-            // slackSend color: 'good', message: "Deployed successfully: ${env.JOB_NAME} #${env.BUILD_NUMBER}"
         }
     }
 }
