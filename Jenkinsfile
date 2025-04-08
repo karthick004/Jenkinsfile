@@ -34,6 +34,7 @@ pipeline {
                     echo "Verifying required files..."
                     [ -f public/index.html ] || { echo "Error: Missing public/index.html"; exit 1; }
                     [ -f src/index.js ] || { echo "Error: Missing src/index.js"; exit 1; }
+                    [ -f package.json ] || { echo "Error: Missing package.json"; exit 1; }
                 '''
             }
         }
@@ -45,12 +46,20 @@ pipeline {
                     echo "Using Node.js version: $(node -v)"
                     echo "Using npm version: $(npm -v)"
                     
+                    # Generate package-lock.json if missing
+                    if [ ! -f package-lock.json ]; then
+                        echo "Generating package-lock.json..."
+                        npm install --package-lock-only
+                    fi
+                    
                     # Clean install with legacy peer deps
-                    npm ci --legacy-peer-deps
+                    npm ci --legacy-peer-deps || {
+                        echo "Fallback to npm install..."
+                        npm install --legacy-peer-deps
+                    }
                     
                     # Fix potential module issues
-                    npm install ajv@^8.0.0
-                    npm install ajv-keywords@^5.0.0
+                    npm install ajv@^8.0.0 ajv-keywords@^5.0.0 --save-exact
                 '''
             }
         }
