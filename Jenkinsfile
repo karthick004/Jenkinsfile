@@ -50,7 +50,7 @@ pipeline {
                             sh '''
                                 echo "Installing client dependencies..."
                                 npm ci --legacy-peer-deps
-                                npm install @babel/plugin-proposal-private-property-in-object --save-dev
+                                npm install @babel/plugin-transform-private-property-in-object --save-dev
                             '''
                         }
                     }
@@ -61,7 +61,7 @@ pipeline {
                             sh '''
                                 if [ -f package.json ]; then
                                     echo "Installing server dependencies..."
-                                    npm ci --legacy-peer-deps --only=production
+                                    npm ci --legacy-peer-deps --omit=dev
                                 fi
                             '''
                         }
@@ -82,6 +82,22 @@ pipeline {
             }
         }
 
+        stage('Install rsync') {
+            steps {
+                sh '''
+                    echo "Installing rsync..."
+                    if command -v apt-get >/dev/null; then
+                        sudo apt-get update && sudo apt-get install -y rsync
+                    elif command -v yum >/dev/null; then
+                        sudo yum install -y rsync
+                    else
+                        echo "Error: Could not determine package manager"
+                        exit 1
+                    fi
+                '''
+            }
+        }
+
         stage('Deploy') {
             steps {
                 script {
@@ -90,15 +106,11 @@ pipeline {
                         keyFileVariable: 'SSH_KEY_FILE',
                         usernameVariable: 'SSH_USERNAME'
                     )]) {
-                        // Deploy client build
                         sh """
                             rsync -avz --delete --progress \
                                 -e "ssh -i ${SSH_KEY_FILE} -o StrictHostKeyChecking=no" \
                                 client/build/ ${SSH_USER}@${SSH_SERVER}:${DEPLOY_DIR}/
-                        """
-                        
-                        // Restart PM2 process
-                        sh """
+                            
                             ssh -i ${SSH_KEY_FILE} -o StrictHostKeyChecking=no ${SSH_USER}@${SSH_SERVER} '
                                 if pm2 id react-app >/dev/null 2>&1; then
                                     pm2 restart react-app
@@ -107,22 +119,6 @@ pipeline {
                                 fi
                             '
                         """
-                        
-                        // Conditional server deployment
-                        if (fileExists('server/package.json')) {
-                            sh """
-                                rsync -avz --delete --progress \
-                                    -e "ssh -i ${SSH_KEY_FILE} -o StrictHostKeyChecking=no" \
-                                    --exclude='node_modules' \
-                                    server/ ${SSH_USER}@${SSH_SERVER}:/opt/react-app-server/
-                                
-                                ssh -i ${SSH_KEY_FILE} -o StrictHostKeyChecking=no ${SSH_USER}@${SSH_SERVER} '
-                                    cd /opt/react-app-server && \
-                                    npm ci --only=production && \
-                                    (pm2 restart server-process || pm2 start server.js --name "server-process")
-                                '
-                            """
-                        }
                     }
                 }
             }
@@ -135,18 +131,26 @@ pipeline {
             cleanWs()
         }
         success {
-            slackSend(
-                color: 'good',
-                message: "SUCCESS: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
-                channel: '#deployments'
-            )
+            script {
+                if (env.SLACK_CHANNEL) {
+                    slackSend(
+                        color: 'good',
+                        message: "SUCCESS: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
+                        channel: env.SLACK_CHANNEL
+                    )
+                }
+            }
         }
         failure {
-            slackSend(
-                color: 'danger',
-                message: "FAILED: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
-                channel: '#deployments'
-            )
+            script {
+                if (env.SLACK_CHANNEL) {
+                    slackSend(
+                        color: 'danger',
+                        message: "FAILED: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
+                        channel: env.SLACK_CHANNEL
+                    )
+                }
+            }
         }
     }
 }
