@@ -24,7 +24,11 @@ pipeline {
                 checkout([
                     $class: 'GitSCM',
                     branches: [[name: 'main']],
-                    extensions: [],
+                    extensions: [[
+                        $class: 'CloneOption',
+                        depth: 1,
+                        shallow: true
+                    ]],
                     userRemoteConfigs: [[
                         credentialsId: 'git-hub',
                         url: 'https://github.com/karthick004/reactapp.git'
@@ -51,6 +55,7 @@ pipeline {
                                 echo "Installing client dependencies..."
                                 npm ci --legacy-peer-deps
                                 npm install @babel/plugin-transform-private-property-in-object --save-dev
+                                npm audit fix || true
                             '''
                         }
                     }
@@ -62,6 +67,9 @@ pipeline {
                                 if [ -f package.json ]; then
                                     echo "Installing server dependencies..."
                                     npm ci --legacy-peer-deps --omit=dev
+                                    npm audit fix || true
+                                else
+                                    echo "No server package.json found - skipping server dependencies"
                                 fi
                             '''
                         }
@@ -77,24 +85,33 @@ pipeline {
                         echo "Building client application..."
                         NODE_OPTIONS="--max-old-space-size=4096" npm run build
                         [ -d build ] || { echo "Error: Build failed - no build directory created"; exit 1; }
+                        
+                        # Verify build output
+                        [ -f build/index.html ] || { echo "Error: Missing build/index.html"; exit 1; }
+                        [ -f build/static/js/main*.js ] || { echo "Error: Missing main JS bundle"; exit 1; }
                     '''
                 }
             }
         }
 
-        stage('Install rsync') {
+        stage('Prepare Deployment') {
             steps {
-                sh '''
-                    echo "Installing rsync..."
-                    if command -v apt-get >/dev/null; then
-                        sudo apt-get update && sudo apt-get install -y rsync
-                    elif command -v yum >/dev/null; then
-                        sudo yum install -y rsync
-                    else
-                        echo "Error: Could not determine package manager"
-                        exit 1
-                    fi
-                '''
+                script {
+                    sh '''
+                        echo "Checking for rsync..."
+                        if ! command -v rsync >/dev/null; then
+                            echo "Installing rsync..."
+                            if command -v apt-get >/dev/null; then
+                                sudo apt-get update && sudo apt-get install -y rsync
+                            elif command -v yum >/dev/null; then
+                                sudo yum install -y rsync
+                            else
+                                echo "Error: Could not determine package manager to install rsync"
+                                exit 1
+                            fi
+                        fi
+                    '''
+                }
             }
         }
 
@@ -107,16 +124,45 @@ pipeline {
                         usernameVariable: 'SSH_USERNAME'
                     )]) {
                         sh """
+                            echo "Deploying application to ${SSH_SERVER}..."
+                            
+                            # Create directory if it doesn't exist
+                            ssh -i ${SSH_KEY_FILE} -o StrictHostKeyChecking=no ${SSH_USER}@${SSH_SERVER} \
+                                "mkdir -p ${DEPLOY_DIR}"
+                            
+                            # Sync build files
                             rsync -avz --delete --progress \
                                 -e "ssh -i ${SSH_KEY_FILE} -o StrictHostKeyChecking=no" \
                                 client/build/ ${SSH_USER}@${SSH_SERVER}:${DEPLOY_DIR}/
                             
+                            # Verify deployment
+                            DEPLOYED_FILES=\$(ssh -i ${SSH_KEY_FILE} -o StrictHostKeyChecking=no ${SSH_USER}@${SSH_SERVER} \
+                                "ls -1 ${DEPLOY_DIR} | wc -l")
+                            if [ "\$DEPLOYED_FILES" -lt 5 ]; then
+                                echo "Error: Deployment verification failed - too few files deployed"
+                                exit 1
+                            fi
+                            
+                            # PM2 Process Management
                             ssh -i ${SSH_KEY_FILE} -o StrictHostKeyChecking=no ${SSH_USER}@${SSH_SERVER} '
-                                if pm2 id react-app >/dev/null 2>&1; then
-                                    pm2 restart react-app
-                                else
-                                    pm2 serve ${DEPLOY_DIR} 3000 --name "react-app" --spa
+                                # Install PM2 if not available
+                                if ! command -v pm2 >/dev/null; then
+                                    echo "Installing PM2..."
+                                    sudo npm install -g pm2
                                 fi
+                                
+                                # Stop existing process if running
+                                pm2 delete react-app 2>/dev/null || true
+                                
+                                # Start application
+                                pm2 serve ${DEPLOY_DIR} 3000 --name "react-app" --spa
+                                
+                                # Save and set up startup
+                                pm2 save
+                                pm2 startup 2>/dev/null || true
+                                
+                                echo "PM2 process list:"
+                                pm2 list
                             '
                         """
                     }
@@ -131,26 +177,10 @@ pipeline {
             cleanWs()
         }
         success {
-            script {
-                if (env.SLACK_CHANNEL) {
-                    slackSend(
-                        color: 'good',
-                        message: "SUCCESS: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
-                        channel: env.SLACK_CHANNEL
-                    )
-                }
-            }
+            echo "Deployment completed successfully"
         }
         failure {
-            script {
-                if (env.SLACK_CHANNEL) {
-                    slackSend(
-                        color: 'danger',
-                        message: "FAILED: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
-                        channel: env.SLACK_CHANNEL
-                    )
-                }
-            }
+            echo "Deployment failed - check logs for details"
         }
     }
 }
