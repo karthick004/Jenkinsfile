@@ -29,54 +29,81 @@ pipeline {
                     changelog: false
                 )
                 
-                // Verify critical files exist
+                // Verify project structure
                 sh '''
-                    echo "Verifying required files..."
-                    [ -f public/index.html ] || { echo "Error: Missing public/index.html"; exit 1; }
-                    [ -f src/index.js ] || { echo "Error: Missing src/index.js"; exit 1; }
-                    [ -f package.json ] || { echo "Error: Missing package.json"; exit 1; }
-                '''
-            }
-        }
-
-        stage('Install Dependencies') {
-            steps {
-                sh '''
-                    # Force Node.js version check
-                    echo "Using Node.js version: $(node -v)"
-                    echo "Using npm version: $(npm -v)"
-                    
-                    # Generate package-lock.json if missing
-                    if [ ! -f package-lock.json ]; then
-                        echo "Generating package-lock.json..."
-                        npm install --package-lock-only
+                    echo "Verifying project structure..."
+                    if [ ! -d client ]; then
+                        echo "Error: Missing client directory"
+                        exit 1
+                    fi
+                    if [ ! -d server ]; then
+                        echo "Error: Missing server directory"
+                        exit 1
                     fi
                     
-                    # Clean install with legacy peer deps
-                    npm ci --legacy-peer-deps || {
-                        echo "Fallback to npm install..."
-                        npm install --legacy-peer-deps
-                    }
+                    # Verify client files
+                    echo "Checking client files..."
+                    if [ ! -f client/public/index.html ]; then
+                        echo "Error: Missing client/public/index.html"
+                        exit 1
+                    fi
+                    if [ ! -f client/src/index.js ]; then
+                        echo "Error: Missing client/src/index.js"
+                        exit 1
+                    fi
+                    if [ ! -f client/package.json ]; then
+                        echo "Error: Missing client/package.json"
+                        exit 1
+                    fi
                     
-                    # Fix potential module issues
-                    npm install ajv@^8.0.0 ajv-keywords@^5.0.0 --save-exact
+                    # Verify server files (if needed)
+                    if [ ! -f server/package.json ]; then
+                        echo "Warning: Missing server/package.json (optional)"
+                    fi
                 '''
             }
         }
 
-        stage('Build Production') {
+        stage('Install Client Dependencies') {
             steps {
-                sh '''
-                    # Verify node_modules exists
-                    [ -d node_modules ] || { echo "Error: node_modules missing"; exit 1; }
-                    
-                    # Run build with increased memory and verbose output for debugging
-                    NODE_OPTIONS="--max-old-space-size=4096" npm run build --verbose
-                    
-                    # Verify build output
-                    [ -d build ] || { echo "Error: Build failed - no build directory"; exit 1; }
-                    [ -f build/index.html ] || { echo "Error: Missing build/index.html"; exit 1; }
-                '''
+                dir('client') {
+                    sh '''
+                        echo "Installing client dependencies..."
+                        npm install --legacy-peer-deps
+                        npm install ajv@^8.0.0 ajv-keywords@^5.0.0 --save-exact
+                    '''
+                }
+            }
+        }
+
+        stage('Install Server Dependencies') {
+            steps {
+                dir('server') {
+                    sh '''
+                        echo "Installing server dependencies..."
+                        if [ -f package.json ]; then
+                            npm install --legacy-peer-deps
+                        else
+                            echo "No server package.json found - skipping"
+                        fi
+                    '''
+                }
+            }
+        }
+
+        stage('Build Client') {
+            steps {
+                dir('client') {
+                    sh '''
+                        echo "Building client..."
+                        NODE_OPTIONS="--max-old-space-size=4096" npm run build
+                        
+                        if [ ! -d build ]; then
+                            echo "Error: Client build failed - no build directory"
+                            exit 1
+                        fi
+                    '''
+                }
             }
         }
 
@@ -85,11 +112,12 @@ pipeline {
                 sshagent(['web-hook']) {
                     script {
                         try {
+                            // Deploy client build
                             sh """
-                                rsync -avz --delete --progress -e ssh build/ ${SSH_USER}@${SSH_SERVER}:${DEPLOY_DIR}/
+                                rsync -avz --delete --progress -e ssh client/build/ ${SSH_USER}@${SSH_SERVER}:${DEPLOY_DIR}/
                             """
                             
-
+                            // Restart PM2 process
                             sh """
                                 ssh ${SSH_USER}@${SSH_SERVER} "
                                     if pm2 id react-app > /dev/null 2>&1; then
