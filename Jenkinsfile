@@ -30,7 +30,7 @@ pipeline {
                         shallow: true
                     ]],
                     userRemoteConfigs: [[
-                        credentialsId: 'git-hub',
+                        credentialsId: 'sandy-token',
                         url: 'https://github.com/CloudMasa-Tech/app-cloudmasa.git/'
                     ]]
                 ])
