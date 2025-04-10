@@ -31,7 +31,7 @@ pipeline {
                     ]],
                     userRemoteConfigs: [[
                         credentialsId: 'git-hub',
-                        url: 'https://github.com/karthick004/reactapp.git'
+                        url: 'https://github.com/CloudMasa-Tech/app-cloudmasa.git/'
                     ]]
                 ])
                 
