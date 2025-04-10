@@ -34,7 +34,7 @@ pipeline {
                         url: 'https://github.com/CloudMasa-Tech/app-cloudmasa.git/'
                     ]]
                 ])
-                
+
                 sh '''
                     echo "Verifying project structure..."
                     [ -d client ] || { echo "Error: Missing client directory"; exit 1; }
@@ -85,7 +85,6 @@ pipeline {
                         echo "Building client application..."
                         NODE_OPTIONS="--max-old-space-size=4096" npm run build
 
-                        # Verify dist folder and expected files
                         [ -d dist ] || { echo "Error: Build failed - no dist directory created"; exit 1; }
                         [ -f dist/index.html ] || { echo "Error: Missing dist/index.html"; exit 1; }
                         ls dist/assets/index-*.js >/dev/null 2>&1 || { echo "Error: Missing main JS bundle in dist/assets"; exit 1; }
@@ -114,53 +113,52 @@ pipeline {
         }
 
         stage('Deploy') {
-    steps {
-        script {
-            withCredentials([sshUserPrivateKey(
-                credentialsId: 'web-hook',
-                keyFileVariable: 'SSH_KEY_FILE',
-                usernameVariable: 'SSH_USERNAME'
-            )]) {
-                sh """
-                    echo "Deploying application to ${SSH_SERVER}..."
+            steps {
+                script {
+                    withCredentials([sshUserPrivateKey(
+                        credentialsId: 'web-hook',
+                        keyFileVariable: 'SSH_KEY_FILE',
+                        usernameVariable: 'SSH_USERNAME'
+                    )]) {
+                        sh '''
+                            echo "Deploying application to $SSH_SERVER..."
 
-                    ssh -i ${SSH_KEY_FILE} -o StrictHostKeyChecking=no ${SSH_USER}@${SSH_SERVER} \
-                        "mkdir -p ${DEPLOY_DIR}"
+                            ssh -i "$SSH_KEY_FILE" -o StrictHostKeyChecking=no "$SSH_USER@$SSH_SERVER" \
+                                "mkdir -p '$DEPLOY_DIR'"
 
-                    rsync -avz --delete --progress \
-                        -e "ssh -i ${SSH_KEY_FILE} -o StrictHostKeyChecking=no" \
-                        client/dist/ ${SSH_USER}@${SSH_SERVER}:${DEPLOY_DIR}/
+                            rsync -avz --delete --progress \
+                                -e "ssh -i $SSH_KEY_FILE -o StrictHostKeyChecking=no" \
+                                client/dist/ "$SSH_USER@$SSH_SERVER:$DEPLOY_DIR/"
 
-                    DEPLOYED_FILES=\$(ssh -i ${SSH_KEY_FILE} -o StrictHostKeyChecking=no ${SSH_USER}@${SSH_SERVER} \
-                        "find ${DEPLOY_DIR} -type f | wc -l")
-                    echo "Deployed files count: \$DEPLOYED_FILES"
-                    if [ "\$DEPLOYED_FILES" -lt 5 ]; then
-                        echo "Error: Deployment verification failed - too few files deployed"
-                        exit 1
-                    fi
+                            DEPLOYED_FILES=$(ssh -i "$SSH_KEY_FILE" -o StrictHostKeyChecking=no "$SSH_USER@$SSH_SERVER" \
+                                "find '$DEPLOY_DIR' -type f | wc -l")
 
-                    ssh -i ${SSH_KEY_FILE} -o StrictHostKeyChecking=no ${SSH_USER}@${SSH_SERVER} '
-                        if ! command -v pm2 >/dev/null; then
-                            echo "Installing PM2..."
-                            npm install -g pm2
-                        fi
+                            echo "Deployed files count: $DEPLOYED_FILES"
+                            if [ "$DEPLOYED_FILES" -lt 5 ]; then
+                                echo "Error: Deployment verification failed - too few files deployed"
+                                exit 1
+                            fi
 
-                        pm2 delete react-app 2>/dev/null || true
+                            ssh -i "$SSH_KEY_FILE" -o StrictHostKeyChecking=no "$SSH_USER@$SSH_SERVER" '
+                                if ! command -v pm2 >/dev/null; then
+                                    echo "Installing PM2..."
+                                    npm install -g pm2
+                                fi
 
-                        pm2 serve ${DEPLOY_DIR} 3000 --name "react-app" --spa
+                                pm2 delete react-app 2>/dev/null || true
+                                pm2 serve '"$DEPLOY_DIR"' 3000 --name "react-app" --spa
+                                pm2 save
+                                pm2 startup 2>/dev/null || true
 
-                        pm2 save
-                        pm2 startup 2>/dev/null || true
-
-                        echo "PM2 process list:"
-                        pm2 list
-                    '
-                """
+                                echo "PM2 process list:"
+                                pm2 list
+                            '
+                        '''
+                    }
+                }
             }
         }
     }
-}
-
 
     post {
         always {
