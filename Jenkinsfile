@@ -2,8 +2,8 @@ pipeline {
     agent any
 
     environment {
-        DEPLOY_DIR = '/home/ubuntu/react-app' // changed from /var/www
-        SSH_SERVER = '98.83.220.198'
+        DEPLOY_DIR = '/var/www/react-app' // changed from /var/www
+        SSH_SERVER = '18.233.101.14'
         SSH_USER = 'ubuntu'
         CI = 'false'
     }
