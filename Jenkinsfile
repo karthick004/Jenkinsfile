@@ -6,7 +6,6 @@ pipeline {
         SSH_SERVER = '98.83.220.198'
         SSH_USER = 'ubuntu'
         CI = 'false'
-        GIT_USER = 'SANDY018922' // 👈 replace with your GitHub username
     }
 
     tools {
@@ -20,21 +19,10 @@ pipeline {
             }
         }
 
-        stage('Setup Git Credentials for LFS') {
-            steps {
-                withCredentials([string(credentialsId: 'GITHUB_LFS_TOKEN', variable: 'GITHUB_TOKEN')]) {
-                    sh '''
-                        echo "Setting up Git credentials for LFS..."
-                        git config --global credential.helper store
-                        echo "https://${GIT_USER}:${GITHUB_TOKEN}@github.com" > ~/.git-credentials
-                        git lfs install
-                    '''
-                }
-            }
-        }
-
         stage('Checkout Code') {
             steps {
+                sh 'git config --global filter.lfs.smudge "git-lfs smudge --skip"'
+                sh 'git config --global filter.lfs.required false'
                 checkout([
                     $class: 'GitSCM',
                     branches: [[name: 'master']],
@@ -45,7 +33,7 @@ pipeline {
                     ]],
                     userRemoteConfigs: [[
                         credentialsId: 'sandy-token',
-                        url: 'https://github.com/CloudMasa-Tech/app-cloudmasa.git/'
+                        url: 'https://github.com/CloudMasa-Tech/app-cloudmasa.git'
                     ]]
                 ])
 
