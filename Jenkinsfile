@@ -3,7 +3,7 @@ pipeline {
 
     environment {
         DEPLOY_DIR = '/var/www/react-app'
-        SSH_SERVER = '18.233.101.14'
+        SSH_SERVER = '98.83.220.198'
         SSH_USER = 'ubuntu'
         CI = 'false'
     }
