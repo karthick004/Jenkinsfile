@@ -125,15 +125,18 @@ pipeline {
                         sh '''
                             echo "Deploying application to $SSH_SERVER..."
 
-                            ssh -i "$SSH_KEY_FILE" -o StrictHostKeyChecking=no "$SSH_USER@$SSH_SERVER" \
-                                "mkdir -p '$DEPLOY_DIR'"
+                          ssh -i "$SSH_KEY_FILE" -o StrictHostKeyChecking=no "$SSH_USER@$SSH_SERVER" \
+    "sudo mkdir -p '$DEPLOY_DIR' && sudo chown -R $SSH_USER:$SSH_USER '$DEPLOY_DIR'"
 
-                            rsync -avz --delete --progress \
-                                -e "ssh -i $SSH_KEY_FILE -o StrictHostKeyChecking=no" \
-                                client/dist/ "$SSH_USER@$SSH_SERVER:$DEPLOY_DIR/"
+sudo chown -R ubuntu:ubuntu /var/www
 
-                            DEPLOYED_FILES=$(ssh -i "$SSH_KEY_FILE" -o StrictHostKeyChecking=no "$SSH_USER@$SSH_SERVER" \
-                                "find '$DEPLOY_DIR' -type f | wc -l")
+                        rsync -avz --delete --progress \
+    -e "ssh -i $SSH_KEY_FILE -o StrictHostKeyChecking=no" \
+    client/dist/ "$SSH_USER@$SSH_SERVER:/tmp/react-dist-temp/"
+
+ssh -i "$SSH_KEY_FILE" -o StrictHostKeyChecking=no "$SSH_USER@$SSH_SERVER" \
+    "sudo rsync -avz /tmp/react-dist-temp/ '$DEPLOY_DIR/' && rm -rf /tmp/react-dist-temp"
+
 
                             echo "Deployed files count: $DEPLOYED_FILES"
                             if [ "$DEPLOYED_FILES" -lt 5 ]; then
