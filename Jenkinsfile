@@ -23,7 +23,7 @@ pipeline {
             steps {
                 checkout([
                     $class: 'GitSCM',
-                    branches: [[name: 'submain']],
+                    branches: [[name: 'master']],
                     extensions: [[
                         $class: 'CloneOption',
                         depth: 1,
