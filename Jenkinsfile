@@ -129,7 +129,7 @@ pipeline {
                         sh '''
                             echo "🔐 Connecting to remote server to setup Apache2..."
 
-                            ssh -i "$SSH_KEY_FILE" -o StrictHostKeyChecking=no "$SSH_USER@$SSH_SERVER" <<'EOF'
+                            ssh -i "$SSH_KEY_FILE" -o StrictHostKeyChecking=no "$SSH_USER@$SSH_SERVER" <<"EOF"
                                 set -e
 
                                 echo "🔍 Checking Apache2..."
@@ -167,7 +167,7 @@ pipeline {
                                 -e "ssh -i $SSH_KEY_FILE -o StrictHostKeyChecking=no" \
                                 client/dist/ "$SSH_USER@$SSH_SERVER:/tmp/react-build/"
 
-                            ssh -i "$SSH_KEY_FILE" -o StrictHostKeyChecking=no "$SSH_USER@$SSH_SERVER" <<'EOF'
+                            ssh -i "$SSH_KEY_FILE" -o StrictHostKeyChecking=no "$SSH_USER@$SSH_SERVER" <<"EOF"
                                 set -e
                                 DEPLOY_DIR="/var/www/app-cloudmasa/client"
 
