@@ -39,10 +39,10 @@ pipeline {
 
                 sh '''
                     echo "Verifying project structure..."
-                    [ -d client ] || { echo "Error: Missing client directory"; exit 1; }
-                    [ -f client/package.json ] || { echo "Error: Missing client/package.json"; exit 1; }
+                    [ -d client ] || { echo "❌ Missing client directory"; exit 1; }
+                    [ -f client/package.json ] || { echo "❌ Missing client/package.json"; exit 1; }
                     if [ -d server ]; then
-                        echo "Server directory found"
+                        echo "✅ Server directory found"
                     fi
                 '''
             }
@@ -87,9 +87,9 @@ pipeline {
                         echo "Building client application..."
                         NODE_OPTIONS="--max-old-space-size=4096" npm run build
 
-                        [ -d dist ] || { echo "Error: Build failed - no dist directory created"; exit 1; }
-                        [ -f dist/index.html ] || { echo "Error: Missing dist/index.html"; exit 1; }
-                        ls dist/assets/index-*.js >/dev/null 2>&1 || { echo "Error: Missing main JS bundle in dist/assets"; exit 1; }
+                        [ -d dist ] || { echo "❌ Build failed - no dist directory created"; exit 1; }
+                        [ -f dist/index.html ] || { echo "❌ Missing dist/index.html"; exit 1; }
+                        ls dist/assets/index-*.js >/dev/null 2>&1 || { echo "❌ Missing main JS bundle in dist/assets"; exit 1; }
                     '''
                 }
             }
@@ -102,11 +102,11 @@ pipeline {
                     if ! command -v rsync >/dev/null; then
                         echo "Installing rsync..."
                         if command -v apt-get >/dev/null; then
-                            apt-get update && apt-get install -y rsync
+                            sudo apt-get update && sudo apt-get install -y rsync
                         elif command -v yum >/dev/null; then
-                            yum install -y rsync
+                            sudo yum install -y rsync
                         else
-                            echo "Error: Could not determine package manager to install rsync"
+                            echo "❌ Could not determine package manager to install rsync"
                             exit 1
                         fi
                     fi
@@ -125,29 +125,29 @@ pipeline {
                         sh '''
                             echo "Deploying application to Apache2 server at $SSH_SERVER..."
 
-                            # Sync build to temp location
+                            # Sync build to temp location on remote
                             rsync -avz --delete --progress \
                                 -e "ssh -i $SSH_KEY_FILE -o StrictHostKeyChecking=no" \
                                 client/dist/ "$SSH_USER@$SSH_SERVER:/tmp/react-build/"
 
-                            # Move to deployment directory on remote host
-                            ssh -i "$SSH_KEY_FILE" -o StrictHostKeyChecking=no "$SSH_USER@$SSH_SERVER" '
+                            # Deploy using sudo on remote server
+                            ssh -i "$SSH_KEY_FILE" -o StrictHostKeyChecking=no "$SSH_USER@$SSH_SERVER" <<'EOF'
                                 set -e
                                 DEPLOY_DIR="/var/www/app-cloudmasa/client"
 
-                                echo "Preparing Apache deployment directory at $DEPLOY_DIR..."
+                                echo "Preparing Apache deployment directory at \$DEPLOY_DIR..."
 
-                                mkdir -p "$DEPLOY_DIR"
-                                rm -rf "$DEPLOY_DIR"/*
-                                cp -r /tmp/react-build/* "$DEPLOY_DIR"
-                                chown -R www-data:www-data "$DEPLOY_DIR"
+                                sudo mkdir -p "\$DEPLOY_DIR"
+                                sudo rm -rf "\$DEPLOY_DIR"/*
+                                sudo cp -r /tmp/react-build/* "\$DEPLOY_DIR"
+                                sudo chown -R www-data:www-data "\$DEPLOY_DIR"
 
                                 echo "Restarting Apache2 service..."
-                                systemctl restart apache2
+                                sudo systemctl restart apache2
 
                                 echo "Deployment complete. Listing deployed files:"
-                                ls -lah "$DEPLOY_DIR"
-                            '
+                                ls -lah "\$DEPLOY_DIR"
+                            EOF
                         '''
                     }
                 }
@@ -157,7 +157,7 @@ pipeline {
 
     post {
         always {
-            echo "Cleaning up workspace"
+            echo "🧹 Cleaning up workspace"
             cleanWs()
         }
         success {
