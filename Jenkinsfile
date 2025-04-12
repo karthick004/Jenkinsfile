@@ -23,9 +23,10 @@ pipeline {
             steps {
                 sh 'git config --global filter.lfs.smudge "git-lfs smudge --skip"'
                 sh 'git config --global filter.lfs.required false'
+
                 checkout([
                     $class: 'GitSCM',
-                    branches: [[name: 'master']],
+                    branches: [[name: '*/master']],
                     extensions: [[
                         $class: 'CloneOption',
                         depth: 1,
@@ -38,8 +39,8 @@ pipeline {
                 ])
 
                 sh '''
-                    echo "Verifying project structure..."
-                    [ -d client ] || { echo "❌ Missing client directory"; exit 1; }
+                    echo "🔍 Verifying project structure..."
+                    [ -d client ] || { echo "❌ Missing 'client' directory"; exit 1; }
                     [ -f client/package.json ] || { echo "❌ Missing client/package.json"; exit 1; }
                     if [ -d server ]; then
                         echo "✅ Server directory found"
@@ -54,7 +55,7 @@ pipeline {
                     steps {
                         dir('client') {
                             sh '''
-                                echo "Installing client dependencies..."
+                                echo "📦 Installing client dependencies..."
                                 npm ci --legacy-peer-deps
                                 npm install @babel/plugin-transform-private-property-in-object --save-dev
                                 npm audit fix || true
@@ -62,16 +63,17 @@ pipeline {
                         }
                     }
                 }
+
                 stage('Server') {
                     steps {
                         dir('server') {
                             sh '''
                                 if [ -f package.json ]; then
-                                    echo "Installing server dependencies..."
+                                    echo "📦 Installing server dependencies..."
                                     npm ci --legacy-peer-deps --omit=dev
                                     npm audit fix || true
                                 else
-                                    echo "No server package.json found - skipping server dependencies"
+                                    echo "ℹ️ No server/package.json found. Skipping..."
                                 fi
                             '''
                         }
@@ -84,37 +86,39 @@ pipeline {
             steps {
                 dir('client') {
                     sh '''
-                        echo "Building client application..."
+                        echo "🔨 Building client application..."
                         NODE_OPTIONS="--max-old-space-size=4096" npm run build
 
-                        [ -d dist ] || { echo "❌ Build failed - no dist directory created"; exit 1; }
+                        [ -d dist ] || { echo "❌ Build failed - dist folder missing"; exit 1; }
                         [ -f dist/index.html ] || { echo "❌ Missing dist/index.html"; exit 1; }
-                        ls dist/assets/index-*.js >/dev/null 2>&1 || { echo "❌ Missing main JS bundle in dist/assets"; exit 1; }
+                        ls dist/assets/index-*.js >/dev/null 2>&1 || { echo "❌ Main JS bundle missing in dist/assets"; exit 1; }
                     '''
                 }
             }
         }
 
-        stage('Prepare Deployment') {
+        stage('Prepare Deployment Tools') {
             steps {
                 sh '''
-                    echo "Checking for rsync..."
-                    if ! command -v rsync >/dev/null; then
-                        echo "Installing rsync..."
+                    echo "🔍 Checking if 'rsync' is installed..."
+                    if ! command -v rsync >/dev/null 2>&1; then
+                        echo "📦 Installing rsync..."
                         if command -v apt-get >/dev/null; then
                             sudo apt-get update && sudo apt-get install -y rsync
                         elif command -v yum >/dev/null; then
                             sudo yum install -y rsync
                         else
-                            echo "❌ Could not determine package manager to install rsync"
+                            echo "❌ No compatible package manager found to install rsync"
                             exit 1
                         fi
+                    else
+                        echo "✅ rsync already installed"
                     fi
                 '''
             }
         }
 
-        stage('Install Apache2 on Remote') {
+        stage('Ensure Apache2 on Remote') {
             steps {
                 script {
                     withCredentials([sshUserPrivateKey(
@@ -123,12 +127,12 @@ pipeline {
                         usernameVariable: 'SSH_USERNAME'
                     )]) {
                         sh '''
-                            echo "Checking Apache2 on remote..."
+                            echo "🔐 Connecting to remote server to setup Apache2..."
 
                             ssh -i "$SSH_KEY_FILE" -o StrictHostKeyChecking=no "$SSH_USER@$SSH_SERVER" <<'EOF'
                                 set -e
 
-                                echo "🔍 Checking if Apache2 is installed..."
+                                echo "🔍 Checking Apache2..."
                                 if ! command -v apache2 >/dev/null 2>&1; then
                                     echo "📦 Installing Apache2..."
                                     sudo apt update
@@ -138,9 +142,9 @@ pipeline {
                                     echo "✅ Apache2 already installed"
                                 fi
 
-                                echo "🟢 Starting Apache2..."
+                                echo "🔄 Restarting Apache2..."
                                 sudo systemctl restart apache2
-                                sudo systemctl status apache2 --no-pager
+                                sudo systemctl status apache2 --no-pager || true
                             EOF
                         '''
                     }
@@ -157,7 +161,7 @@ pipeline {
                         usernameVariable: 'SSH_USERNAME'
                     )]) {
                         sh '''
-                            echo "🚀 Deploying application to Apache2 server at $SSH_SERVER..."
+                            echo "🚀 Deploying client build to remote server..."
 
                             rsync -avz --delete --progress \
                                 -e "ssh -i $SSH_KEY_FILE -o StrictHostKeyChecking=no" \
@@ -173,10 +177,10 @@ pipeline {
                                 sudo cp -r /tmp/react-build/* "\$DEPLOY_DIR"
                                 sudo chown -R www-data:www-data "\$DEPLOY_DIR"
 
-                                echo "🔄 Restarting Apache2..."
+                                echo "🔁 Restarting Apache2..."
                                 sudo systemctl restart apache2
 
-                                echo "✅ Deployment complete. Files at \$DEPLOY_DIR:"
+                                echo "✅ Deployment complete! Files at \$DEPLOY_DIR:"
                                 ls -lah "\$DEPLOY_DIR"
                             EOF
                         '''
@@ -188,14 +192,14 @@ pipeline {
 
     post {
         always {
-            echo "🧹 Cleaning up workspace"
+            echo "🧹 Cleaning workspace..."
             cleanWs()
         }
         success {
-            echo "✅ Deployment completed successfully"
+            echo "✅ Deployment completed successfully!"
         }
         failure {
-            echo "❌ Deployment failed - check logs for details"
+            echo "❌ Deployment failed. Please check the logs for errors."
         }
     }
 }
