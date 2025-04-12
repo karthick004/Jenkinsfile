@@ -2,8 +2,8 @@ pipeline {
     agent any
 
     environment {
-        DEPLOY_DIR = '/var/www/app-cloudmasa/client'
-        SSH_SERVER = '54.89.22.70'
+        DEPLOY_DIR = '/var/www/react-app' // changed from /var/www
+        SSH_SERVER = '18.204.203.92'
         SSH_USER = 'ubuntu'
         CI = 'false'
     }
@@ -21,9 +21,11 @@ pipeline {
 
         stage('Checkout Code') {
             steps {
+                sh 'git config --global filter.lfs.smudge "git-lfs smudge --skip"'
+                sh 'git config --global filter.lfs.required false'
                 checkout([
                     $class: 'GitSCM',
-                    branches: [[name: '*/master']],
+                    branches: [[name: 'master']],
                     extensions: [[
                         $class: 'CloneOption',
                         depth: 1,
@@ -36,25 +38,44 @@ pipeline {
                 ])
 
                 sh '''
-                    echo "🔍 Verifying project structure..."
-                    ls -la
-                    [ -d client ] || { echo "❌ Missing 'client' directory"; exit 1; }
-                    [ -f client/package.json ] || { echo "❌ Missing client/package.json"; exit 1; }
-                    echo "✅ Project structure verified"
+                    echo "Verifying project structure..."
+                    [ -d client ] || { echo "Error: Missing client directory"; exit 1; }
+                    [ -f client/package.json ] || { echo "Error: Missing client/package.json"; exit 1; }
+                    if [ -d server ]; then
+                        echo "Server directory found"
+                    fi
                 '''
             }
         }
 
         stage('Install Dependencies') {
-            steps {
-                dir('client') {
-                    sh '''
-                        echo "📦 Installing client dependencies..."
-                        npm install || npm ci --legacy-peer-deps
-                        npm install @babel/plugin-transform-private-property-in-object --save-dev
-                        npm audit fix || true
-                        echo "✅ Dependencies installed"
-                    '''
+            parallel {
+                stage('Client') {
+                    steps {
+                        dir('client') {
+                            sh '''
+                                echo "Installing client dependencies..."
+                                npm ci --legacy-peer-deps
+                                npm install @babel/plugin-transform-private-property-in-object --save-dev
+                                npm audit fix || true
+                            '''
+                        }
+                    }
+                }
+                stage('Server') {
+                    steps {
+                        dir('server') {
+                            sh '''
+                                if [ -f package.json ]; then
+                                    echo "Installing server dependencies..."
+                                    npm ci --legacy-peer-deps --omit=dev
+                                    npm audit fix || true
+                                else
+                                    echo "No server package.json found - skipping server dependencies"
+                                fi
+                            '''
+                        }
+                    }
                 }
             }
         }
@@ -63,35 +84,37 @@ pipeline {
             steps {
                 dir('client') {
                     sh '''
-                        echo "🔨 Building client application..."
+                        echo "Building client application..."
                         NODE_OPTIONS="--max-old-space-size=4096" npm run build
 
-                        echo "Build artifacts:"
-                        ls -la dist/
-                        [ -d dist ] || { echo "❌ Build failed - dist folder missing"; exit 1; }
-                        [ -f dist/index.html ] || { echo "❌ Missing dist/index.html"; exit 1; }
-                        echo "✅ Build completed successfully"
+                        [ -d dist ] || { echo "Error: Build failed - no dist directory created"; exit 1; }
+                        [ -f dist/index.html ] || { echo "Error: Missing dist/index.html"; exit 1; }
+                        ls dist/assets/index-*.js >/dev/null 2>&1 || { echo "Error: Missing main JS bundle in dist/assets"; exit 1; }
                     '''
                 }
             }
         }
 
-        stage('Verify Deployment Tools') {
+        stage('Prepare Deployment') {
             steps {
                 sh '''
-                    echo "🔍 Checking tools..."
-                    echo "Node version:"
-                    node --version
-                    echo "npm version:"
-                    npm --version
-                    echo "rsync version:"
-                    rsync --version || { echo "❌ rsync not found"; exit 1; }
-                    echo "✅ All tools verified"
+                    echo "Checking for rsync..."
+                    if ! command -v rsync >/dev/null; then
+                        echo "Installing rsync..."
+                        if command -v apt-get >/dev/null; then
+                            apt-get update && apt-get install -y rsync
+                        elif command -v yum >/dev/null; then
+                            yum install -y rsync
+                        else
+                            echo "Error: Could not determine package manager to install rsync"
+                            exit 1
+                        fi
+                    fi
                 '''
             }
         }
 
-        stage('Remote Server Setup') {
+        stage('Deploy') {
             steps {
                 script {
                     withCredentials([sshUserPrivateKey(
@@ -99,104 +122,40 @@ pipeline {
                         keyFileVariable: 'SSH_KEY_FILE',
                         usernameVariable: 'SSH_USERNAME'
                     )]) {
-                        // First verify SSH connection works
-                        sh """
-                            echo "🔐 Testing SSH connection..."
-                            ssh -i "$SSH_KEY_FILE" -o StrictHostKeyChecking=no -o ConnectTimeout=10 "$SSH_USER@$SSH_SERVER" "echo 'SSH connection successful'"
-                            
-                            echo "🛠 Setting up remote server..."
-                            ssh -i "$SSH_KEY_FILE" -o StrictHostKeyChecking=no "$SSH_USER@$SSH_SERVER" '
-                                set -ex
-                                echo "Updating packages..."
-                                sudo apt-get update -y
-                                
-                                echo "Installing Apache if needed..."
-                                if ! command -v apache2 >/dev/null 2>&1; then
-                                    sudo apt-get install -y apache2
-                                fi
-                                
-                                echo "Creating deployment directory: ${DEPLOY_DIR}"
-                                sudo mkdir -p "${DEPLOY_DIR}"
-                                sudo chown -R $SSH_USER:$SSH_USER "${DEPLOY_DIR}"
-                                sudo chmod -R 755 "${DEPLOY_DIR}"
-                                
-                                echo "Configuring Apache..."
-                                sudo a2enmod rewrite
-                                cat <<EOF | sudo tee /etc/apache2/sites-available/app-cloudmasa.conf
-<VirtualHost *:80>
-    ServerAdmin admin@cloudmasa.com
-    ServerName ${SSH_SERVER}
-    DocumentRoot ${DEPLOY_DIR}
-    
-    <Directory ${DEPLOY_DIR}>
-        Options Indexes FollowSymLinks
-        AllowOverride All
-        Require all granted
-        DirectoryIndex index.html
-    </Directory>
-    
-    ErrorLog \${APACHE_LOG_DIR}/error.log
-    CustomLog \${APACHE_LOG_DIR}/access.log combined
-</VirtualHost>
-EOF
-                                
-                                sudo a2dissite 000-default.conf
-                                sudo a2ensite app-cloudmasa.conf
-                                sudo systemctl restart apache2
-                            '
-                        """
-                    }
-                }
-            }
-        }
+                        sh '''
+                            echo "Deploying application to $SSH_SERVER..."
 
-        stage('Deploy Application') {
-            steps {
-                script {
-                    withCredentials([sshUserPrivateKey(
-                        credentialsId: 'web-hook',
-                        keyFileVariable: 'SSH_KEY_FILE',
-                        usernameVariable: 'SSH_USERNAME'
-                    )]) {
-                        sh """
-                            echo "🚀 Starting deployment..."
-                            
-                            echo "📦 Syncing build files..."
+                            ssh -i "$SSH_KEY_FILE" -o StrictHostKeyChecking=no "$SSH_USER@$SSH_SERVER" \
+                                "mkdir -p '$DEPLOY_DIR'"
+
                             rsync -avz --delete --progress \
                                 -e "ssh -i $SSH_KEY_FILE -o StrictHostKeyChecking=no" \
-                                client/dist/ "$SSH_USER@$SSH_SERVER:/tmp/react-build/"
-                            
-                            echo "🏗 Moving files to production..."
+                                client/dist/ "$SSH_USER@$SSH_SERVER:$DEPLOY_DIR/"
+
+                            DEPLOYED_FILES=$(ssh -i "$SSH_KEY_FILE" -o StrictHostKeyChecking=no "$SSH_USER@$SSH_SERVER" \
+                                "find '$DEPLOY_DIR' -type f | wc -l")
+
+                            echo "Deployed files count: $DEPLOYED_FILES"
+                            if [ "$DEPLOYED_FILES" -lt 5 ]; then
+                                echo "Error: Deployment verification failed - too few files deployed"
+                                exit 1
+                            fi
+
                             ssh -i "$SSH_KEY_FILE" -o StrictHostKeyChecking=no "$SSH_USER@$SSH_SERVER" '
-                                set -ex
-                                echo "Cleaning deployment directory..."
-                                sudo rm -rf "${DEPLOY_DIR}"/*
-                                
-                                echo "Moving files..."
-                                sudo mv /tmp/react-build/* "${DEPLOY_DIR}/"
-                                
-                                echo "Setting permissions..."
-                                sudo chown -R www-data:www-data "${DEPLOY_DIR}"
-                                sudo chmod -R 755 "${DEPLOY_DIR}"
-                                
-                                echo "Configuring .htaccess..."
-                                cat <<EOF | sudo tee "${DEPLOY_DIR}/.htaccess"
-Options -MultiViews
-RewriteEngine On
-RewriteBase /
-RewriteRule ^index\\.html$ - [L]
-RewriteCond %{REQUEST_FILENAME} !-f
-RewriteCond %{REQUEST_FILENAME} !-d
-RewriteRule . /index.html [L]
-EOF
-                                
-                                echo "Restarting Apache..."
-                                sudo systemctl restart apache2
-                                
-                                echo "Verifying deployment..."
-                                ls -la "${DEPLOY_DIR}"
+                                if ! command -v pm2 >/dev/null; then
+                                    echo "Installing PM2..."
+                                    npm install -g pm2
+                                fi
+
+                                pm2 delete react-app 2>/dev/null || true
+                                pm2 serve '"$DEPLOY_DIR"' 3000 --name "react-app" --spa
+                                pm2 save
+                                pm2 startup 2>/dev/null || true
+
+                                echo "PM2 process list:"
+                                pm2 list
                             '
-                        """
+                        '''
                     }
                 }
             }
@@ -205,26 +164,14 @@ EOF
 
     post {
         always {
-            echo "🧹 Cleaning workspace..."
+            echo "Cleaning up workspace"
             cleanWs()
         }
         success {
-            echo "✅ Pipeline completed successfully!"
-            script {
-                withCredentials([sshUserPrivateKey(
-                    credentialsId: 'web-hook',
-                    keyFileVariable: 'SSH_KEY_FILE',
-                    usernameVariable: 'SSH_USERNAME'
-                )]) {
-                    echo "🌐 Your React app is now live at: http://${SSH_SERVER}"
-                }
-            }
+            echo "Deployment completed successfully"
         }
         failure {
-            echo "❌ Pipeline failed. Please check the logs for errors."
-            script {
-                // Add any failure notifications here
-            }
+            echo "Deployment failed - check logs for details"
         }
     }
 }
