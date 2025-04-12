@@ -114,6 +114,40 @@ pipeline {
             }
         }
 
+        stage('Install Apache2 on Remote') {
+            steps {
+                script {
+                    withCredentials([sshUserPrivateKey(
+                        credentialsId: 'web-hook',
+                        keyFileVariable: 'SSH_KEY_FILE',
+                        usernameVariable: 'SSH_USERNAME'
+                    )]) {
+                        sh '''
+                            echo "Checking Apache2 on remote..."
+
+                            ssh -i "$SSH_KEY_FILE" -o StrictHostKeyChecking=no "$SSH_USER@$SSH_SERVER" <<'EOF'
+                                set -e
+
+                                echo "🔍 Checking if Apache2 is installed..."
+                                if ! command -v apache2 >/dev/null 2>&1; then
+                                    echo "📦 Installing Apache2..."
+                                    sudo apt update
+                                    sudo apt install -y apache2
+                                    sudo systemctl enable apache2
+                                else
+                                    echo "✅ Apache2 already installed"
+                                fi
+
+                                echo "🟢 Starting Apache2..."
+                                sudo systemctl restart apache2
+                                sudo systemctl status apache2 --no-pager
+                            EOF
+                        '''
+                    }
+                }
+            }
+        }
+
         stage('Deploy') {
             steps {
                 script {
@@ -123,29 +157,26 @@ pipeline {
                         usernameVariable: 'SSH_USERNAME'
                     )]) {
                         sh '''
-                            echo "Deploying application to Apache2 server at $SSH_SERVER..."
+                            echo "🚀 Deploying application to Apache2 server at $SSH_SERVER..."
 
-                            # Sync build to temp location on remote
                             rsync -avz --delete --progress \
                                 -e "ssh -i $SSH_KEY_FILE -o StrictHostKeyChecking=no" \
                                 client/dist/ "$SSH_USER@$SSH_SERVER:/tmp/react-build/"
 
-                            # Deploy using sudo on remote server
                             ssh -i "$SSH_KEY_FILE" -o StrictHostKeyChecking=no "$SSH_USER@$SSH_SERVER" <<'EOF'
                                 set -e
                                 DEPLOY_DIR="/var/www/app-cloudmasa/client"
 
-                                echo "Preparing Apache deployment directory at \$DEPLOY_DIR..."
-
+                                echo "📁 Deploying to \$DEPLOY_DIR..."
                                 sudo mkdir -p "\$DEPLOY_DIR"
                                 sudo rm -rf "\$DEPLOY_DIR"/*
                                 sudo cp -r /tmp/react-build/* "\$DEPLOY_DIR"
                                 sudo chown -R www-data:www-data "\$DEPLOY_DIR"
 
-                                echo "Restarting Apache2 service..."
+                                echo "🔄 Restarting Apache2..."
                                 sudo systemctl restart apache2
 
-                                echo "Deployment complete. Listing deployed files:"
+                                echo "✅ Deployment complete. Files at \$DEPLOY_DIR:"
                                 ls -lah "\$DEPLOY_DIR"
                             EOF
                         '''
