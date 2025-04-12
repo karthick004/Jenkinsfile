@@ -2,8 +2,8 @@ pipeline {
     agent any
 
     environment {
-        DEPLOY_DIR = '/var/www/react-app' // changed from /var/www
-        SSH_SERVER = '18.233.101.14'
+        DEPLOY_DIR = '/var/www/app-cloudmasa/client'
+        SSH_SERVER = '54.89.22.70'
         SSH_USER = 'ubuntu'
         CI = 'false'
     }
@@ -123,37 +123,30 @@ pipeline {
                         usernameVariable: 'SSH_USERNAME'
                     )]) {
                         sh '''
-                            echo "Deploying application to $SSH_SERVER..."
+                            echo "Deploying application to Apache2 server at $SSH_SERVER..."
 
-                            ssh -i "$SSH_KEY_FILE" -o StrictHostKeyChecking=no "$SSH_USER@$SSH_SERVER" \
-                                "mkdir -p '$DEPLOY_DIR'"
-
+                            # Sync build to temp location
                             rsync -avz --delete --progress \
                                 -e "ssh -i $SSH_KEY_FILE -o StrictHostKeyChecking=no" \
-                                client/dist/ "$SSH_USER@$SSH_SERVER:$DEPLOY_DIR/"
+                                client/dist/ "$SSH_USER@$SSH_SERVER:/tmp/react-build/"
 
-                            DEPLOYED_FILES=$(ssh -i "$SSH_KEY_FILE" -o StrictHostKeyChecking=no "$SSH_USER@$SSH_SERVER" \
-                                "find '$DEPLOY_DIR' -type f | wc -l")
-
-                            echo "Deployed files count: $DEPLOYED_FILES"
-                            if [ "$DEPLOYED_FILES" -lt 5 ]; then
-                                echo "Error: Deployment verification failed - too few files deployed"
-                                exit 1
-                            fi
-
+                            # Move to deployment directory on remote host
                             ssh -i "$SSH_KEY_FILE" -o StrictHostKeyChecking=no "$SSH_USER@$SSH_SERVER" '
-                                if ! command -v pm2 >/dev/null; then
-                                    echo "Installing PM2..."
-                                    npm install -g pm2
-                                fi
+                                set -e
+                                DEPLOY_DIR="/var/www/app-cloudmasa/client"
 
-                                pm2 delete react-app 2>/dev/null || true
-                                pm2 serve '"$DEPLOY_DIR"' 3000 --name "react-app" --spa
-                                pm2 save
-                                pm2 startup 2>/dev/null || true
+                                echo "Preparing Apache deployment directory at $DEPLOY_DIR..."
 
-                                echo "PM2 process list:"
-                                pm2 list
+                                mkdir -p "$DEPLOY_DIR"
+                                rm -rf "$DEPLOY_DIR"/*
+                                cp -r /tmp/react-build/* "$DEPLOY_DIR"
+                                chown -R www-data:www-data "$DEPLOY_DIR"
+
+                                echo "Restarting Apache2 service..."
+                                systemctl restart apache2
+
+                                echo "Deployment complete. Listing deployed files:"
+                                ls -lah "$DEPLOY_DIR"
                             '
                         '''
                     }
@@ -168,10 +161,10 @@ pipeline {
             cleanWs()
         }
         success {
-            echo "Deployment completed successfully"
+            echo "✅ Deployment completed successfully"
         }
         failure {
-            echo "Deployment failed - check logs for details"
+            echo "❌ Deployment failed - check logs for details"
         }
     }
 }
