@@ -55,6 +55,7 @@ pipeline {
                         dir('client') {
                             sh '''
                                 echo "Installing client dependencies..."
+                                apt install sudo
                                 npm ci --legacy-peer-deps
                                 npm install @babel/plugin-transform-private-property-in-object --save-dev
                                 npm audit fix || true
@@ -154,7 +155,7 @@ pipeline {
 
                                 echo "PM2 process list:"
                                 pm2 list
-                                systemctl reload nginx
+                                sudo systemctl reload nginx
 
                             '
                         '''
