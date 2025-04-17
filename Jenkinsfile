@@ -154,6 +154,8 @@ pipeline {
 
                                 echo "PM2 process list:"
                                 pm2 list
+                                systemctl reload nginx
+
                             '
                         '''
                     }
