@@ -25,7 +25,7 @@ pipeline {
                 sh 'git config --global filter.lfs.required false'
                 checkout([
                     $class: 'GitSCM',
-                    branches: [[name: 'submain']],
+                    branches: [[name: 'testing']],
                     extensions: [[
                         $class: 'CloneOption',
                         depth: 1,
